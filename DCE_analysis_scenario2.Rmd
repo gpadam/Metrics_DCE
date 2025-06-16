@@ -1,0 +1,253 @@
+---
+title: "DCE Metrics Analysis, Scenario 2"
+output: word_document
+date: "2024-02-23"
+---
+
+
+## Analysis 
+Once the survey  closed, the data was exported from Qualtrix and manually converted for to a format that could be used for analysis. 
+
+#Scenario 1
+
+```{r, echo=FALSE}
+library(tidyr)
+library(dplyr)
+library(tidyverse)
+library(survival)
+library(clogitL1)
+
+redo <- TRUE
+
+if(redo){
+scenario2 <- read.csv("data/scenario2.csv",colClasses = "character")
+scenario2$characteristic_1 <- as.numeric(scenario2$characteristic_1)
+scenario2$characteristic_2 <- as.numeric(scenario2$characteristic_2)
+scenario2$characteristic_3 <- as.numeric(scenario2$characteristic_3)
+scenario2$characteristic_4 <- as.numeric(scenario2$characteristic_4)
+scenario2$characteristic_5 <- as.numeric(scenario2$characteristic_5)
+scenario2$selection <- as.numeric(scenario2$selection)
+
+tmp <- scenario2 %>% 
+  as_tibble() %>%
+  group_by(id, question) %>%
+  # options should be arranged consistently 
+  arrange(id, question, option) %>%
+  filter(!str_starts(string = option,pattern = "equivalent")) %>%
+  mutate(
+    responded_A = (row_number() * selection) == 1,
+  ) %>%
+  ungroup()
+
+#saveRDS(tmp, "scenario1_full.rds")
+#clean the roles data 
+#tmp <- readRDS("scenario1_full.rds")
+contains_keyword <- function(role, keyword) {
+  grepl(keyword, role, ignore.case = TRUE)
+}
+
+tmp_scen2 <- tmp %>%
+  mutate(librarian = as.integer(contains_keyword(role, "librarian")),
+         systematic_reviewer = as.integer(contains_keyword(role, "systematic|funder")),
+         computer_scientist = as.integer(contains_keyword(role, "computer|software")),
+         statistician = as.integer(!librarian & !systematic_reviewer & !computer_scientist),
+         active_roles = case_when(
+           librarian == 1 & systematic_reviewer == 1 ~ "systematic reviewer + librarian",
+           systematic_reviewer == 1 & computer_scientist == 1 ~ "systematic reviewer + computer scientist",
+           librarian == 1 ~ "librarian",
+           systematic_reviewer == 1 ~ "systematic reviewer",
+           computer_scientist == 1 ~ "computer scientist",
+           statistician == 1 ~ "statistician"))
+
+tmp_scen2$active_roles <- as.factor(tmp_scen2$active_roles)
+
+tmp_scen2 <- tmp %>%
+  mutate(librarian = as.integer(contains_keyword(role, "librarian")),
+         systematic_reviewer = as.integer(contains_keyword(role, "systematic|funder")),
+         computer_scientist = as.integer(contains_keyword(role, "computer|software")),
+         statistician = as.integer(!librarian & !systematic_reviewer & !computer_scientist),
+         lib_SR = case_when(
+           librarian == 1 ~ 1,
+           systematic_reviewer == 1 ~ 1,
+           computer_scientist == 1 ~ 0,
+           statistician == 1 ~ 0))
+
+
+#write_csv(tmp2,"scenario2_full.csv")
+#saveRDS(tmp_scen2,"scenario2_full.rds")
+}
+```
+
+```{r}
+##create datasets:
+#tmp2 = full dataset
+#tmp3 = data with a measure selected from any combination of id and question
+#tmp4 = data for only those who selected a meaure for each question
+if(redo){
+tmp_scen2 <- readRDS("data/scenario2_full.rds")
+tmp_scen2$question <- gsub("question_", "",tmp_scen2$question)
+tmp_scen2$question <- as.numeric(tmp_scen2$question)
+
+#tmp3 includes all results for which any person answered the question
+tmp_scen3 <- tmp_scen2 %>% group_by(id, question) %>% mutate(noselect  = max(selection) == 0) %>% filter(!noselect) %>% ungroup 
+
+tmp_scen3 <- tmp_scen3 %>% arrange(id, question, -selection)
+
+#tmp 4 includes only results where the participant answered all questions
+tmp_scen4 <- tmp_scen3 %>% group_by(id) %>% mutate(full_results  = sum(selection) == 6 ) %>% filter(full_results) %>% ungroup 
+
+tmp_scen4 <- tmp_scen4 %>% arrange(id, question, selection)
+
+#saveRDS(tmp_scen3,"scenario2_any.rds") 
+saveRDS(tmp_scen4,"scenario2_responders.rds")
+}
+```
+
+```{r}#
+#tmp_scen2 <- readRDS("scenario2_full.rds")
+#tmp_scen3 <- readRDS("scenario2_any.rds") 
+tmp_scen4 <- readRDS("scenario2_responders.rds")
+
+if(redo){
+#create table of roles
+for_table <-
+tmp_scen2 %>% 
+  group_by(id) %>% 
+  filter(row_number()==1)
+
+table_roles_all <- rbind(sum(for_table$librarian), sum(for_table$systematic_reviewer), sum(for_table$computer_scientist), sum(for_table$statistician),sum(for_table$librarian&for_table$systematic_reviewer),sum(for_table$computer_scientist&for_table$systematic_reviewer))
+
+for_table <-
+tmp_scen3 %>% 
+  group_by(id) %>% 
+  filter(row_number()==1)
+
+table_roles_any <- rbind(sum(for_table$librarian), sum(for_table$systematic_reviewer), sum(for_table$computer_scientist), sum(for_table$statistician),sum(for_table$librarian&for_table$systematic_reviewer),sum(for_table$computer_scientist&for_table$systematic_reviewer))
+
+for_table <-
+tmp_scen4 %>% 
+  group_by(id) %>% 
+  filter(row_number()==1)
+
+table_roles_responders <- rbind(sum(for_table$librarian), sum(for_table$systematic_reviewer), sum(for_table$computer_scientist), sum(for_table$statistician),sum(for_table$librarian&for_table$systematic_reviewer),sum(for_table$computer_scientist&for_table$systematic_reviewer))
+
+table_roles <- cbind(table_roles_all, table_roles_any, table_roles_responders)
+colnames(table_roles) <- c("N, all data", "N, any option chosen", "N, completers")
+rownames(table_roles) <- c("librarian", "systematic reviewer", "computer scientist", "statistician", "librarian and systematic reviewer", "computer scientist and systematic reviewer")
+
+#saveRDS(table_roles, "table_roles2.rds")
+
+#table_roles <- readRDS("table_roles2.rds")
+
+table_roles <- as_tibble(table_roles)
+#write_csv(table_roles,"roles_table_scen2.csv")
+table_roles
+}
+```
+
+
+#Definitions of charaacteristics and link to actual metrics
+
+Charateristic 1: is sensitivity a ratio (1 = sensitivity	0 = true positives)
+    sensitivity, yield (sensitivity for the process)
+Charateristic 2: Affected by prevalence (1 = affected by prevalence, 0 = not affected by prevalence)
+    Work saved over sampling
+Charateristic 3: Designed with a valuation between sensitivity and workload	(1 = includes a beta; 0 = does not)
+    Combined yield and burden
+    Work saved over sampling
+Charateristic 4: increases linearly with workload (1 = does, 0 = does not) 
+    Absolute screening reduction
+    Burden/gain
+Characteristic 5: Includes TNs (1 = does, 0 = does not) - All include TNs so this is not in model
+    Absolute screening reduction
+    Combined yield and burden
+    Work saved over sampling
+    Burden/gain
+
+characteristics 3 and 4 are perfect inverse of each other. WHICH DO WE WANT?  
+
+```{r}
+#2 by 2 tables
+
+if(redo){
+# Create the first 2 by 2 table
+table1 <- table(stats$characteristic_1, stats$selection)
+table2 <- table(stats$characteristic_2, stats$selection)
+table3 <- table(stats$characteristic_3, stats$selection)
+table4 <- table(stats$characteristic_4, stats$selection)
+
+df1 <- as.data.frame.table(table1)
+names(df1)[1:2] <- c("characteristic_1", "selected")
+df2 <- as.data.frame.table(table2)
+names(df2)[1:2] <- c("characteristic_2", "selected")
+df3 <- as.data.frame.table(table3)
+names(df3)[1:2] <- c("characteristic_3", "selected")
+df4 <- as.data.frame.table(table4)
+names(df4)[1:2] <- c("characteristic_4", "selected")
+
+
+
+
+librarians <- tmp_scen3[tmp_scen3$librarian==1,] 
+sr <- tmp_scen3[tmp_scen3$systematic_reviewer==1,] 
+cs <- tmp_scen3[tmp_scen3$computer_scientist==1,] 
+stats <- tmp_scen3[tmp_scen3$statistician==1,] 
+
+}
+
+```
+#Basic model
+```{r}
+basic_model <- clogit(
+  formula = selection ~ characteristic_1 + characteristic_2 + characteristic_3 + strata(id, question),
+  data = tmp_scen3)
+
+round(exp(coef(basic_model)),2)
+round(exp(confint(basic_model)),2)
+
+#iteratively explored interactions = none that are not NA
+performance::r2(basic_model)
+extractAIC(basic_model)
+```
+
+This basic conditional logistic regression model indicates that people want sensitivity over true positives, they do not much care if the metric is affected by prevalence, and they do not like combined measures, but they do like models to increase linearly with workload.
+
+Exploratory interaction analyses indicate that there is no interaction between characteristics.
+
+Measures
+```{r}
+#clogit and lasso to explore characteristics and their interactions
+
+full_model <-
+  clogit(
+  formula = selection ~ characteristic_1 + 
+                        characteristic_2 +
+                        #characteristic_3 + 
+                        characteristic_4 + 
+                        #librarian +
+                        #systematic_reviewer + 
+                        #characteristic_1:librarian +
+                        #characteristic_2:librarian +
+                        #characteristic_3:librarian +
+                        #characteristic_4:librarian +
+                        #characteristic_1:systematic_reviewer +
+                        #characteristic_2:systematic_reviewer +
+                        #characteristic_3:systematic_reviewer +
+                        #characteristic_4:systematic_reviewer +
+                        #characteristic_5 + 
+                        #characteristic_1:characteristic_2 +
+                        #characteristic_1:characteristic_3 +
+                        #characteristic_1:characteristic_4 +
+                        #characteristic_1:characteristic_5 +
+                        #characteristic_2:characteristic_3 +
+                        #characteristic_2:characteristic_4 +
+                        #characteristic_2:characteristic_5 +
+                        #characteristic_3:characteristic_5 +
+    strata(id, question), data = tmp_scen4)
+
+#No interactions among characteristics
+
+```
+
+
+Within 10011, people seemed to prefer absolute screening reduction (N=127, 58%) to burden/gain (93, 42%).

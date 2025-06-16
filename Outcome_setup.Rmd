@@ -1,0 +1,89 @@
+---
+title: "DCE_outcome_setup"
+output: word_document
+date: '2025-04-07'
+---
+
+Functions for setting up outcomes
+```{r}
+library(idefix)
+
+#find metrics where all abstracts are manually screened
+allowed_options <- function(allowed_profiles, survey){
+  X_cand <- allowed_profiles[which(survey==1), c("sens_ratio", "burden_prev", "burden_tradeoff", "burden_linworkload", "burden_tn")]
+  X_cand <- as.matrix(X_cand)
+  return(X_cand)
+}
+
+
+aggregate_design <- function(X_cand, number_choice_sets, number_adaptive_sets, number_alternatives, rerun_sol1){
+  set.seed(12345)
+  pd <- MASS::mvrnorm(n = 10, mu = mu, Sigma = v) 
+  pd_mat_or_list <-pd
+  alt.cte <- rep(0,number_alternatives)
+
+  if(rerun_sol1) {
+  sol_out <- idefix::Modfed(cand.set = X_cand, n.sets = number_choice_sets, 
+                            n.alts = number_alternatives, 
+                            par.draws = pd_mat_or_list,
+                            alt.cte = alt.cte,
+                            parallel=FALSE)
+  return(sol_out)  
+  }
+}
+
+number_choice_sets <- 20
+number_adaptive_sets <- 10
+number_alternatives <- 2
+rerun_sol1 <- T   # repeat the modified Fedorov Aggregate Design
+add_no_choice_alternative <- FALSE
+
+sol_out <- aggregate_design(X_cand, number_choice_sets, number_adaptive_sets, number_alternatives, rerun_sol1)
+
+write.csv(sol_out$design, "data/survey_design1.csv", row.names = FALSE)
+
+```
+
+run functions to set up outcomes for allowed profiles
+```{r}
+
+library(idefix)
+library(dplyr)
+
+
+
+allowed_profiles <- read.csv("datasets/allowed_profiles.csv")
+
+## Define parameters 
+
+Atts <- c("sens_ratio", "burden_prev", "burden_tradeoff", "burden_linworkload", "burden_tn")
+number_choice_sets <- 20 #20 for surevy 1 10 for survey 2
+number_adaptive_sets <- 0
+number_alternatives <- 2
+rerun_sol1 <- T   # repeat the modified Fedorov Aggregate Design
+add_no_choice_alternative <- FALSE
+
+## Generate the aggregate design  
+X_cand <- allowed_options(allowed_profiles, allowed_profiles$allowed_1) #survey 1
+X_cand <- allowed_options(allowed_profiles, allowed_profiles$allowed_2) #survey 2
+
+sol_out <- aggregate_design(X_cand, number_choice_sets, number_adaptive_sets, number_alternatives, rerun_sol1)
+
+write.csv(sol_out$design, "datasets/survey_design2.csv", row.names = FALSE)
+
+
+#Data for survey part 1
+des.1 <- read.csv("datasets/survey_design1.csv")
+mapping.1 <- read.csv("datasets/mapping1.csv")
+
+dce_data <- left_join(des.1,mapping.1, by=c("sens_ratio", "burden_prev", "burden_tradeoff", "burden_linworkload","burden_tn"))
+write.csv(dce_data,"dce_data.csv")
+
+#Data for survey part 2
+des.2 <- read.csv("datasets/survey_design2.csv")
+des.2 <- des.2[,c(1:3)]
+mapping.2 <- read.csv("datasets/mapping2.csv")
+dce_data_alt <- left_join(des.2,mapping.2, by=c("sens_ratio", "burden_prev", "burden_tradeoff"))
+write.csv(dce_data_alt,"dce_data_alt.csv")
+```
+

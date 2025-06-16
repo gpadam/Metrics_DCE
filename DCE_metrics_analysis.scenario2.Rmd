@@ -1,0 +1,91 @@
+---
+title: "DCE Metrics Analysis, flow"
+output: word_document
+date: "2024-02-23"
+---
+```{r}
+library(tidyverse)
+library(tidyr)
+```
+
+Scenario 2: everyone
+```{r}
+m <- basic_model
+b <- matrix(m$coefficients)
+V <- m$var
+
+### find unique rows in the model matrix => measures 
+### We have to identify them 
+X <- unique(model.matrix(m)) 
+## you could assign the rownames of X to the profile description here 
+## or reorder them 
+rownames(X) <- c("1. Yield + Burden or asr", "2. TP_ASR", "3. WSS", "4. comb yield + burden")
+
+
+### The reference profile is 0, 0, 0, (TP/ASRT)
+### So the contrast vector for it will be 
+for (r in 1:nrow(X)){
+  if(all(X[r, c("characteristic_1", "characteristic_2", "characteristic_3")] ==
+          c(1, 0, 0))) { #Sensitivity of the screening process/Absolute screening reduction
+    x0 <- X[r, , drop = FALSE]
+    a0 <- t(x0)
+  }
+}
+
+### For a single profile I would
+### create the contrast vectors using sens/spec as the reference 
+### (') means transpose
+### (x' - a0) : in column form 
+### (x' - a0)' = (x - x0): in row form 
+### and then do the (x - x0)*b 
+### But I can do this for all together by stacking the (x-x0) a matrix
+A <- X - x0[rep(1, nrow(X)), ]
+
+### The point estimate is then exp(A * b) 
+theta <- A %*% b 
+exp(theta)
+
+### The variance of the first contrast would be 
+### A[1,] %*% V %*% A[1,]'
+a1 <- A[1, , drop = FALSE]
+v1 <- a1 %*% V %*% t(a1)
+se1 <- sqrt(v1)
+
+### for all of them  
+v <- c()
+for (r in 1:nrow(A)) {
+  a <- A[r, , drop = FALSE]
+  v <- c(v,  a %*% V %*% t(a))
+}
+se <- sqrt(v)
+
+### with CIs
+low <- theta + qnorm(0.025) * se
+high <- theta + qnorm(1 - 0.025) * se
+
+log_results <- cbind(theta, low, high)
+results <- format(exp(log_results), digits = 2, nsmall = 2)
+colnames(results) <- c("OR", "CI_low", "CI_high")
+measures2 <- c("Comb sens & burden", "WSS", "Sens + Burden or ASR", "TP + ASR")
+metrics_table2 <- as_tibble(results)
+metrics_table2 <- data.frame(measures2,metrics_table2)
+metrics_table2$OR <- as.numeric(metrics_table2$OR)
+metrics_table2$CI_low <- as.numeric(metrics_table2$CI_low)
+metrics_table2$CI_high <- as.numeric(metrics_table2$CI_high)
+
+```
+
+```{r}
+scenario_2_measures <- ggplot(data=metrics_table2, aes(x=reorder(measures2, OR), y=OR)) +
+  geom_bar(stat="identity", fill="steelblue4") +
+  geom_errorbar(aes(ymin=CI_low, ymax=CI_high), width=.2) +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "red") +  
+  coord_flip() +
+  scale_x_discrete(name = "Measure set") +
+  scale_y_continuous(name="Predicted odds of being chosen (compared to Sens + Burden/ASR)", seq(0,4,0.5)) +
+  theme_minimal() 
+  
+  scenario_2_measures
+
+
+```

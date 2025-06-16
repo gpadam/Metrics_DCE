@@ -1,0 +1,596 @@
+---
+title: "DCE Metrics Analysis, Scenario 1"
+output: word_document
+date: "2024-02-23"
+---
+
+
+## Analysis 
+Once the survey  closed, the data was exported from Qualtrix and manually converted for to a format that could be used for analysis. 
+
+#Scenario 1
+
+```{r}
+library(tidyr)
+library(dplyr)
+library(tidyverse)
+library(survival)
+#library(clogitLasso)
+library(clogitL1)
+
+##datasets:
+#tmp2 = full dataset
+#tmp3 = data with a measure selected from any combination of id and question
+#tmp4 = data for only those who selected a meaure for each question
+
+tmp2 <- readRDS("data/scenario1_full.rds")
+tmp3 <- readRDS("data/scenario1_any.rds")
+tmp4 <- readRDS("data/scenario1_responders.rds")
+
+#number in each role by dataset
+Role <- c("Librarian", "Systematic review methodologist", "Computer scientist", "Statistician", "Librarian and Systematic review methodologist", "Computer scientist and Systematic review methodologist")
+table_roles <- readRDS("table_roles.rds")
+
+table_roles <- as_tibble(cbind(Role,table_roles))
+
+#write_csv(table_roles,"roles_table.csv")
+```
+
+#Definitions of charaacteristics and link to actual metrics
+
+Characteristic 1: is sensitivity a ratio (1 = sensitivity	0 = true positives)
+  
+  sensitivity
+  
+  
+Characteristic 2: Affected by prevalence (1 = affected by prevalence, 0 = not affected by prevalence)
+  
+  precision/positive predictive value
+  
+  negative predictive value
+  
+  correlation coefficient
+  
+  number needed to read
+ 
+  F1 score
+  
+  F20 score
+  
+  accuracy
+  
+  
+
+
+Characteristic 3: Designed with a valuation between sensitivty and workload	(1 = includes a beta; 0 = does not)
+ 
+  F1 score
+ 
+  F20 score
+ 
+  accuracy
+ 
+  
+Characteristic 4: increases linearly with workload (1 = does, 0 = does not)
+  
+  false positives
+  
+  number needed to read
+  
+Characteristic 5: Includes TNs (1 = does, 0 = does not)
+
+  specificity
+  
+  positive likelihood ratio
+  
+  negative predictive value
+  
+  correlation coefficient
+  
+  accuracy
+
+
+#Basic model
+```{r}
+
+basic_model_all <- clogit(
+  formula = selection ~ characteristic_1 + characteristic_2 +
+     characteristic_3 + characteristic_4 + characteristic_5 + strata(id, question),
+  data = tmp3)
+
+basic_model_completers <- clogit(
+  formula = selection ~ characteristic_1 + characteristic_2 +
+     characteristic_3 + characteristic_4 + characteristic_5 + strata(id, question),
+  data = tmp4)
+
+summary(basic_model_completers)
+round(exp(coef(basic_model_all)),2)
+round(exp(confint(basic_model_all)),2)
+
+performance::r2(basic_model_all)
+extractAIC(basic_model_completers)
+
+```
+This basic conditional logistic regression model indicates that characteristics 1 and 4 may be guiding people's selection of metrics, with a preference for sensitivity over true positives and a preference for measures that increase linearly with burden (NNR or FP).
+
+##Interactions
+We then examined whether a person's preference for one characteristic affects their preference for another. For example if measures that incorporate true negatives are preferred, do respondents prefer them to also be dependent on prevalence (e.g., accuracy) or not (e.g., specificity)
+
+#We explored the following interactions:
+characteristic 1 (sensitivity) with all others. 
+
+Because sensitivity is comparatively so important to systematic reviews, respondents might select  sensitivity regardless of the burden measure proposed.
+
+
+characteristic 2 (affected by prevalence) interacted with 
+
+  characteristic 3 (measures with both included accuracy and the F-score) 
+  
+  characteristic 4 (measures with both included NNR)
+  
+  characteristic 5 (measures with both included NPV, correlation coefficient, and accuracy)
+  
+
+characteristic 3 (Designed with a valuation between sensitivity and workload) interacted with 
+
+  characteristic 4 (no measures included both)
+  
+  characteristic 5 (measures with both included accuracy)
+  
+
+characteristic 4 (measures with both included NNR) interacted with 
+
+  characteristic 5 (no measures included both)
+  
+
+```{r}
+tmp3$attribute_1 <- tmp3$characteristic_1
+tmp3$attribute_2 <- tmp3$characteristic_2
+tmp3$attribute_3 <- tmp3$characteristic_3
+tmp3$attribute_4 <- tmp3$characteristic_4
+tmp3$attribute_5 <- tmp3$characteristic_5
+
+tmp4$attribute_1 <- tmp4$characteristic_1
+tmp4$attribute_2 <- tmp4$characteristic_2
+tmp4$attribute_3 <- tmp4$characteristic_3
+tmp4$attribute_4 <- tmp4$characteristic_4
+tmp4$attribute_5 <- tmp4$characteristic_5
+
+```
+
+##lasso responders
+
+```{r}
+
+#clogit and lasso to explore characteristics and their interactions: responders
+set.seed(1234)
+
+full_model_respond <-
+  clogit(
+  formula = selection ~ attribute_1 + 
+                        attribute_2 +
+                        attribute_3 + 
+                        attribute_4 + 
+                        attribute_5 +
+                        attribute_1:attribute_2 +
+                        attribute_1:attribute_3 +
+                        attribute_1:attribute_4 +
+                        attribute_1:attribute_5 +
+                        attribute_2:attribute_3 +
+                        attribute_2:attribute_4 +
+                        attribute_2:attribute_5 +
+                        attribute_3:attribute_5 +
+    strata(id, question), data = tmp4)
+
+full_model_any <-
+  clogit(
+  formula = selection ~ attribute_1 + 
+                        attribute_2 +
+                        attribute_3 + 
+                        attribute_4 + 
+                        attribute_5 +
+                        attribute_1:attribute_2 +
+                        attribute_1:attribute_3 +
+                        attribute_1:attribute_4 +
+                        attribute_1:attribute_5 +
+                        attribute_2:attribute_3 +
+                        attribute_2:attribute_4 +
+                        attribute_2:attribute_5 +
+                        attribute_3:attribute_5 +
+    strata(id, question), data = tmp3)
+
+
+#specify the response variable (selection) and the strata variables
+x_resp <- model.matrix(full_model_respond)
+y_resp <- as.numeric(tmp4$selection)
+question_resp <- as.numeric(tmp4$question)
+id_resp <- as.numeric(tmp4$id)
+
+#specify the response variable (selection) and the strata variables
+x_any <- model.matrix(full_model_any)
+y_any <- as.numeric(tmp3$selection)
+question_any <- as.numeric(tmp3$question)
+id_any <- as.numeric(tmp3$id)
+
+
+#run logit model
+lasso_model_responders <- clogitL1(x = x_resp, y = y_resp, strata=as.numeric(strata(id_resp,question_resp)), numLambda=100,  minLambdaRatio=0.000001, switch=0, alpha=1)
+
+lasso_model_any <- clogitL1(x = x_any, y = y_any, strata=as.numeric(strata(id_any,question_any)), numLambda=100,  minLambdaRatio=0.000001, switch=0, alpha=1)
+
+
+plot(lasso_model_responders)
+plot(lasso_model_any)
+#summary(lasso_model)
+
+cv_responders <- cv.clogitL1(lasso_model_responders,numFolds=10)
+cv_any <- cv.clogitL1(lasso_model_any,numFolds=10)
+
+plot(cv_responders)
+plot(cv_any)
+
+best_model_responders <- summary(cv_responders)
+best_model_responders$lambda_minCV
+best_model_any <- summary(cv_any)
+best_model_any$lambda_minCV
+
+variables <- c("attribute 1", "attribute 2", "attribute 3","attribute 4","attribute 5",
+              "attributes 1 and 2",       
+              "attributes 1 and 3","attributes 1 and 4",
+              "attributes 1 and 5", "attributes 2 and 3", "attributes 2 and 4", "attributes 2 and 5",
+              "attributes 3 and 5")
+best_model_results_responders <- as_tibble(cbind(variables, round(exp(best_model_responders$beta_minCV),2), round(exp(best_model_responders$beta_minCV1se),2)))
+best_model_results_responders <- best_model_results_responders %>%
+  rename('OR, Min CV' = 'V2',  'OR Min CV 1 SE' = 'V3')
+
+best_model_results_any <- as_tibble(cbind(variables, round(exp(best_model_any$beta_minCV),2), round(exp(best_model_any$beta_minCV1se),2)))
+best_model_results_any <- best_model_results_any %>%
+  rename('OR, Min CV' = 'V2',  'OR Min CV 1 SE' = 'V3')
+
+best_model_results_responders
+best_model_results_any
+
+#Min CV 1 SE selects the simplest model with estimate CV within 1 standard deviation of the minimum cv.
+```
+##lasso all responses
+```{r}
+#clogit and lasso to explore characteristics and their interactions: all responses
+set.seed(1234)
+
+full_model <-
+  clogit(
+  formula = selection ~ characteristic_1 + 
+                        characteristic_2 +
+                        characteristic_3 + 
+                        characteristic_4 + 
+                        characteristic_5 + 
+                        #librarian + 
+                        characteristic_1:characteristic_2 +
+                        characteristic_1:characteristic_3 +
+                        characteristic_1:characteristic_4 +
+                        characteristic_1:characteristic_5 +
+                        #characteristic_2:characteristic_3 +
+                        characteristic_2:characteristic_4 +
+                        #characteristic_2:characteristic_5 +
+                        characteristic_3:characteristic_5 +
+                        #characteristic_1:librarian +
+                        #characteristic_2:librarian +
+                        #characteristic_3:librarian +
+                        #characteristic_4:librarian +
+                        #characteristic_5:librarian +
+    strata(id, question), data = tmp3)
+
+
+#specify the response variable (selection) and the strata variables
+x <- model.matrix(full_model)
+y <- as.numeric(tmp3$selection)
+question <- as.numeric(tmp3$question)
+id <- as.numeric(tmp3$id)
+
+#run logit model
+lasso_model_all <- clogitL1(x = x, y = y, strata=as.numeric(strata(id,question)), numLambda=100,  minLambdaRatio=0.000001, switch=0, alpha=1)
+
+plot(lasso_model_all)
+#summary(lasso_model)
+
+cv_all <- cv.clogitL1(lasso_model_all,numFolds=10)
+plot(cv_all)
+best_model_all <- summary(cv_all)
+variables <- c("characteristic_1", "characteristic_2", "characteristic_3","characteristic_4","characteristic_5",
+              "characteristic_1:characteristic_2",       
+              "characteristic_1:characteristic_3","characteristic_1:characteristic_4",
+              "characteristic_1:characteristic_5", "characteristic_2:characteristic_4",
+              "characteristic_3:characteristic_5")
+best_model_results_all <- as_tibble(cbind(variables, round(exp(best_model_all$beta_minCV),2), round(exp(best_model_all$beta_minCV1se),2)))
+best_model_results_all <- best_model_results_all %>%
+  rename('OR, Min CV' = 'V2',  'OR Min CV 1 SE' = 'V3')
+best_model_results_all
+
+#Min CV 1 SE selects the simplest model with estimate CV within 1 standard deviation of the minimum cv.
+
+
+```
+get rid of interactions, because they are = to 1 in tmp 4 and very close to 1 in tmp3:
+1 & 4  
+1 & 5
+2 & 3
+2 & 4
+
+```{r}
+#New clogit with only interactions that survived lasso regressions
+#on tmp3 and tmp4
+
+char_interact_model_responders <- clogit(
+  formula = selection ~ characteristic_1 + 
+                        characteristic_2 +
+                        characteristic_3 + 
+                        characteristic_4 + 
+                        characteristic_5 + 
+                        characteristic_1:characteristic_2 +
+                        characteristic_1:characteristic_3 +
+                        characteristic_2:characteristic_5 +
+                        characteristic_3:characteristic_5 +
+    strata(id, question), data = tmp4)
+
+char_interact_model_all_responses <- clogit(
+  formula = selection ~ characteristic_1 + 
+                        characteristic_2 +
+                        characteristic_3 + 
+                        characteristic_4 + 
+                        characteristic_5 + 
+                        characteristic_1:characteristic_2 +
+                        characteristic_1:characteristic_3 +
+                        characteristic_2:characteristic_5 +
+                        characteristic_3:characteristic_5 +
+    strata(id, question), data = tmp3)
+
+summary(char_interact_model_responders)
+performance::r2(char_interact_model_responders)
+extractAIC(char_interact_model_responders)
+#create a table of results (magnitude and direction)
+column_names <- c("Responders OR","Responders 95%CI low", "Responders 95%CI high","All responses OR","All responses 95%CI low", "All responses 95%CI high")
+rows <- c("Characteristic 1: is sensitivity a ratio", "Characteristic 2: Affected by prevalence", "Characteristic 3: Designed with a valuation between sensitivty and workload","Characteristic 4: increases linearly with workload", "Characteristic 5: Includes TNs", "Interaction of characeristics 1 and 2", "Interaction of characeristics 1 and 3", "Interaction of characeristics 2 and 5", "Interaction of characeristics 3 and 5")
+
+characteristics_table <- as_tibble(cbind(rows,
+  round(exp(coef(char_interact_model_responders)),2), 
+  round(exp(confint(char_interact_model_responders)),2),
+  round(exp(coef(char_interact_model_all_responses)),2), 
+  round(exp(confint(char_interact_model_all_responses)),2)
+  ))
+characteristics_table <- characteristics_table  %>%
+  rename("Responders OR" = V2, "Responders 95%CI low"='2.5 %', "Responders 95%CI high"='97.5 %',"All responses OR"=V5,"All responses 95%CI low"=V6, "All responses 95%CI high"=V7)  %>%
+  unite("Responders 95%CI", "Responders 95%CI low":"Responders 95%CI high", sep = '-', remove = TRUE) %>%
+  unite("All responses 95%CI", "All responses 95%CI low":"All responses 95%CI high", sep = '-', remove = TRUE)
+  
+
+characteristics_table
+#write_csv(characteristics_table,"results/characteristics_results.csv")
+```
+
+
+Finally, we looked to see whether these results differed by the respondent's role
+
+  We were particularly interested in wether beaing a user of methods/tools (libraian or systematic reviewer) lead to having different preferences to being a producer (computer scientist), but given the very small sample of computer scientists who responded, we were unable to analyse this adequately. Thus we explored whether being a systematic reviewer lead to different preferences compared to all other roles, and whether being a librarian lead to different preferences compared to all other roles.
+
+```{r}
+#subset data to dataset for librarians and for SRs
+tmp3_librarians <- tmp3[tmp3$librarian==1,]
+tmp4_librarians <- tmp4[tmp4$librarian==1,] 
+tmp3_sr <- tmp3[tmp3$systematic_reviewer==1,]
+tmp4_sr <- tmp4[tmp4$systematic_reviewer==1,] 
+tmp3_cs <- tmp3[tmp3$computer_scientist==1,]
+tmp4_cs <- tmp4[tmp4$computer_scientist==1,]
+tmp3_stat <- tmp3[tmp3$statistician==1,]
+tmp4_stat <- tmp4[tmp4$statistician==1,]
+```
+
+```{r}
+set.seed(1234)
+#subset by role - use all data
+lib_model <- clogit(
+  formula = selection ~ characteristic_1 + 
+                        characteristic_2 +
+                        characteristic_3 + 
+                        characteristic_4 + 
+                        characteristic_5 +
+                        characteristic_1:characteristic_2 +
+                        characteristic_1:characteristic_3 +
+                        characteristic_1:characteristic_4 +
+                        characteristic_1:characteristic_5 +
+                        characteristic_2:characteristic_3 +
+                        characteristic_2:characteristic_4 +
+                        characteristic_2:characteristic_5 +
+                        characteristic_3:characteristic_5 +
+    strata(id, question), data = tmp3_librarians)
+
+sr_model <- clogit(
+  formula = selection ~ characteristic_1 + 
+                        characteristic_2 +
+                        characteristic_3 + 
+                        characteristic_4 + 
+                        characteristic_5 +
+                        characteristic_1:characteristic_2 +
+                        characteristic_1:characteristic_3 +
+                        characteristic_1:characteristic_4 +
+                        characteristic_1:characteristic_5 +
+                        characteristic_2:characteristic_3 +
+                        characteristic_2:characteristic_4 +
+                        characteristic_2:characteristic_5 +
+                        characteristic_3:characteristic_5 +
+    strata(id, question), data = tmp3_sr)
+
+#specify the response variable (selection) and the strata variables librarians
+x_lib <- model.matrix(lib_model)
+y_lib <- as.numeric(tmp3_librarians$selection)
+question_lib <- as.numeric(tmp3_librarians$question)
+id_lib <- as.numeric(tmp3_librarians$id)
+
+#specify the response variable (selection) and the strata variables sr
+x_sr <- model.matrix(sr_model)
+y_sr <- as.numeric(tmp3_sr$selection)
+question_sr <- as.numeric(tmp3_sr$question)
+id_sr <- as.numeric(tmp3_sr$id)
+
+#run logit model
+lasso_librarian <- clogitL1(x = x_lib, y = y_lib, strata=as.numeric(strata(id_lib,question_lib)), numLambda=100,  minLambdaRatio=0.000001, switch=0, alpha=1)
+
+lasso_sr <- clogitL1(x = x_sr, y = y_sr, strata=as.numeric(strata(id_sr,question_sr)), numLambda=100,  minLambdaRatio=0.000001, switch=0, alpha=1)
+
+plot(lasso_librarian)
+plot(lasso_sr)
+
+cv_lib <- cv.clogitL1(lasso_librarian,numFolds=10)
+cv_sr <- cv.clogitL1(lasso_sr,numFolds=10)
+
+plot(cv_lib)
+plot(cv_sr)
+
+
+best_model_lib <- summary(cv_lib)
+best_model_sr <- summary(cv_sr)
+
+variables <- c("characteristic_1", "characteristic_2", "characteristic_3","characteristic_4","characteristic_5",
+              "characteristic_1:characteristic_2",       
+              "characteristic_1:characteristic_3","characteristic_1:characteristic_4",
+              "characteristic_1:characteristic_5", "characteristic_2:characteristic_3", "characteristic_2:characteristic_4", "characteristic_2:characteristic_5",
+              "characteristic_3:characteristic_5")
+
+results_lib <- as_tibble(cbind(variables, round(exp(coef(lib_model)),2), round(exp(best_model_lib$beta_minCV),2), round(exp(best_model_lib$beta_minCV1se),2)))
+                         
+results_lib <- results_lib %>%
+  rename('Non-lasso' = 'V2', 'Min CV' = 'V3',  'OR Min CV 1 SE' = 'V4')
+
+results_sr <- as_tibble((cbind(variables, round(exp(coef(sr_model)),2), round(exp(best_model_sr$beta_minCV),2), round(exp(best_model_sr$beta_minCV1se),2))))
+results_sr <- results_sr %>%
+  rename('Non-lasso' = 'V2', 'Min CV' = 'V3',  'OR Min CV 1 SE' = 'V4')
+
+results_lib
+results_sr
+
+
+```
+```{r}
+#New clogit with only interactions that survived lasso regressions
+
+
+char_interact_model_librarians <- clogit(
+  formula = selection ~ characteristic_1 + 
+                        characteristic_2 +
+                        characteristic_3 + 
+                        characteristic_4 + 
+                        characteristic_5 + 
+                        characteristic_1:characteristic_2 +
+                        characteristic_1:characteristic_3 +
+                        characteristic_2:characteristic_5 +
+                        characteristic_3:characteristic_5 +
+    strata(id, question), data = tmp3_librarians)
+
+char_interact_model_sr <- clogit(
+  formula = selection ~ characteristic_1 + 
+                        characteristic_2 +
+                        characteristic_3 + 
+                        characteristic_4 + 
+                        characteristic_5 + 
+                        characteristic_1:characteristic_2 +
+                        characteristic_1:characteristic_3 +
+                        characteristic_2:characteristic_5 +
+                        characteristic_3:characteristic_5 +
+    strata(id, question), data = tmp3_sr)
+
+summary(char_interact_model_librarians)
+performance::r2(char_interact_model_librarians)
+extractAIC(char_interact_model_librarians)
+
+#create a table of results (magnitude and direction)
+column_names <- c("Responders OR","Responders 95%CI low", "Responders 95%CI high","All responses OR","All responses 95%CI low", "All responses 95%CI high")
+rows <- c("Characteristic 1: is sensitivity a ratio", "Characteristic 2: Affected by prevalence", "Characteristic 3: Designed with a valuation between sensitivty and workload","Characteristic 4: increases linearly with workload", "Characteristic 5: Includes TNs", "Interaction of characeristics 1 and 2", "Interaction of characeristics 1 and 3", "Interaction of characeristics 2 and 5", "Interaction of characeristics 3 and 5")
+
+roles_table <- as_tibble(cbind(rows,
+  round(exp(coef(char_interact_model_librarians)),2), 
+  round(exp(confint(char_interact_model_librarians)),2),
+  round(exp(coef(char_interact_model_sr)),2), 
+  round(exp(confint(char_interact_model_sr)),2)
+  ))
+roles_table <- characteristics_table  %>%
+  rename("Librarians OR" = V2, "Librarians 95%CI low"='2.5 %', "Librarians 95%CI high"='97.5 %',"SR OR"=V5,"SR 95%CI low"=V6, "SRs 95%CI high"=V7)  %>%
+  unite("Librarians 95%CI", "Librarians 95%CI low":"Librarians 95%CI high", sep = '-', remove = TRUE) %>%
+  unite("SR 95%CI", "SR 95%CI low":"SR 95%CI high", sep = '-', remove = TRUE)
+  
+
+roles_table
+#write_csv(characteristics_table,"results/characteristics_results.csv")
+```
+
+```{r}
+#logistic regression with librians
+final_with_role_any <- clogit(
+  formula = selection ~ characteristic_1 + 
+    characteristic_2 +
+    characteristic_3 + 
+    characteristic_4 + 
+    characteristic_5 + 
+    librarian +
+    characteristic_1:characteristic_2 +
+    characteristic_1:characteristic_3 +
+    characteristic_2:characteristic_5 +
+    characteristic_3:characteristic_5 +
+    characteristic_1:librarian +
+    characteristic_2:librarian +
+    characteristic_3:librarian +
+    characteristic_4:librarian +
+    characteristic_5:librarian +
+    strata(id, question), data = tmp3)
+
+final_with_role_complete <- clogit(
+  formula = selection ~ characteristic_1 + 
+    characteristic_2 +
+    characteristic_3 + 
+    characteristic_4 + 
+    characteristic_5 + 
+    librarian +
+    characteristic_1:characteristic_2 +
+    characteristic_1:characteristic_3 +
+    characteristic_2:characteristic_5 +
+    characteristic_3:characteristic_5 +
+    characteristic_1:librarian +
+    characteristic_2:librarian +
+    characteristic_3:librarian +
+    characteristic_4:librarian +
+    characteristic_5:librarian +
+    strata(id, question), data = tmp4)
+
+summary(final_with_role_any)
+performance::r2(final_with_role_any)
+extractAIC(final_with_role_any)
+
+summary(final_with_role_complete)
+performance::r2(final_with_role_complete)
+extractAIC(final_with_role_complete)
+
+librows <- c("Characteristic 1: is sensitivity a ratio", "Characteristic 2: Affected by prevalence", "Characteristic 3: Designed with a valuation between sensitivty and workload","Characteristic 4: increases linearly with workload", "Characteristic 5: Includes TNs", "librarian", "Interaction of characeristics 1 and 2", "Interaction of characeristics 1 and 3", "Interaction of characeristics 2 and 5", "Interaction of characeristics 3 and 5",  "interaction of characteristic 1 and librarian", "interaction of characteristic 2 and librarian","interaction of characteristic 3 and librarian","interaction of characteristic 4 and librarian","interaction of characteristic 5 and librarian")
+
+libcoef_any <- round(exp(coef(final_with_role_any)),2)
+libci_any <- round(exp(confint(final_with_role_any)),2)
+
+libcoef_complete <- round(exp(coef(final_with_role_complete)),2)
+libci_complete <- round(exp(confint(final_with_role_complete)),2)
+
+roles_table <- as_tibble(cbind(librows,libcoef_any,libci_any,libcoef_complete,libci_complete))
+roles_table <- roles_table  %>%
+  rename("OR any response" = libcoef_any, "OR completers" = libcoef_complete, "95%CI low"='2.5 %', "95%CI high"='97.5 %', "95%CI low c"=V6, "95%CI highc"=V7) %>%
+  unite("95%CI", "95%CI low c":"95%CI high c", sep = '-', remove = TRUE)  
+write_csv(roles_table,"libtable.csv")
+```
+
+```{r}
+#LR test 
+
+#Any response
+library(lmtest)
+likelihood_ratio_test <- lrtest(basic_model_completers, char_interact_model_all_responses)
+likelihood_ratio_test
+
+likelihood_ratio_test2 <- lrtest(basic_model_completers, final_with_role_complete)
+likelihood_ratio_test2
+
+```
